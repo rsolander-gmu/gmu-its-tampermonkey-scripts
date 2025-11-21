@@ -1,2 +1,2 @@
 # gmu-ITS-TamperMonkey-Scripts
-Houses Tampermonkey code for use for admins at GMU
+Varius scripts used at GMU OLR team using Tampermonkey
