@@ -1,16 +1,17 @@
 // ==UserScript==
 // @name         Enroll Faculty and Student Incompletes
-// @version      2025-07-25
+// @version      2026-03-18
 // @description  Enrolls Users and handles incompletes with section creation and date validation
 // @author       Rob Solander
 // @match        https://gmu.beta.instructure.com/courses/*/users
 // @match        https://canvas.gmu.edu/courses/*/users
 // @grant        none
+// @downloadURL  https://mason.gmu.edu/~rsolande/Enroll%20Faculty%20and%20Student%20Incompletes.user.js
+// @updateURL    https://mason.gmu.edu/~rsolande/Enroll%20Faculty%20and%20Student%20Incompletes.user.js
 // ==/UserScript==
 
-(function() {
+(function () {
   'use strict';
-
   if (ENV.CONCLUDED_SECTIONS.length === 0) return;
 
   const courseIdMatch = window.location.pathname.match(/courses\/(\d+)/);
@@ -23,7 +24,7 @@
   let originalTermId, originalEndDate;
 
   function getCourseDetails(callback) {
-    $.get(`/api/v1/courses/${courseId}`, function(data) {
+    $.get(`/api/v1/courses/${courseId}`, function (data) {
       originalTermId = data.enrollment_term_id;
       originalEndDate = data.end_at;
       callback();
@@ -57,7 +58,7 @@
       5: "TaEnrollment",
       6: "DesignerEnrollment"
     };
-    const enrollmentType = roleMap[parseInt(roleId)];
+    const enrollmentType = roleMap[parseInt(roleId, 10)];
     $.ajax({
       type: "POST",
       url: `/api/v1/courses/${courseId}/enrollments`,
@@ -66,7 +67,7 @@
         enrollment: {
           user_id: "sis_login_id:" + userId,
           type: enrollmentType,
-          role_id: parseInt(roleId),
+          role_id: parseInt(roleId, 10),
           enrollment_state: "active"
         }
       }),
@@ -85,51 +86,112 @@
       contentType: "application/json",
       data: JSON.stringify({
         course_section: {
-          name: "Incompletes",
+          name: "Extended Access",
           end_at: endDate,
           restrict_enrollments_to_section_dates: true
         }
       }),
       success: function (data) {
-        console.log("✅ Incompletes section created:", data);
-        let sectionid = data.id;
+        console.log("✅ Extended Access created:", data);
         callback(data.id);
       },
       error: function (xhr) {
-        console.error("❌ Failed to create incompletes section:", xhr.responseText);
-        alert("Failed to create incompletes section.");
+        console.error("❌ Failed to create Extended Access section:", xhr.responseText);
+        alert("Failed to create Extended Access section.");
       }
     });
+  }
+
+  /**
+   * 🔒 NEW: Verify all users exist first; reject quickly on first missing user.
+   * Minimal addition to gate the rest of the flow.
+   */
+  function verifyUsersExist(userIds) {
+    const dfd = $.Deferred();
+    if (userIds.length === 0) {
+      dfd.reject(); // nothing to verify
+      return dfd.promise();
+    }
+
+    let remaining = userIds.length;
+    let failed = false;
+
+    userIds.forEach(userId => {
+      $.ajax({
+        type: "GET",
+        url: `/api/v1/users/sis_login_id:${userId}`
+      }).done(() => {
+        if (failed) return;
+        remaining -= 1;
+        if (remaining === 0) dfd.resolve();
+      }).fail(() => {
+        if (failed) return;
+        failed = true;
+        alert(`❌ User NOT found: ${userId}`); // ← your existing signal
+        dfd.reject();
+      });
+    });
+
+    return dfd.promise();
   }
 
   function enrollInSection(userId, sectionId) {
+    // 1️⃣ Look up existing enrollments in the course
     $.ajax({
-      type: "POST",
+      type: "GET",
       url: `/api/v1/courses/${courseId}/enrollments`,
-      contentType: "application/json",
-      data: JSON.stringify({
-        enrollment: {
-          user_id: "sis_login_id:" + userId,
-          type: "StudentEnrollment",
-          enrollment_state: "active",
-          course_section_id: sectionId
+      data: {
+        user_id: "sis_login_id:" + userId,
+        state: ["active", "invited"]
+      },
+      success: function (enrollments) {
+
+        // 2️⃣ Determine enrollment type
+        let enrollmentType = "TeacherEnrollment"; // ✅ default fallback
+
+        if (Array.isArray(enrollments) && enrollments.length > 0) {
+          enrollmentType = enrollments[0].type;
+          console.log(`ℹ️ Found existing role for ${userId}: ${enrollmentType}`);
+        } else {
+          console.log(`⚠️ No role found for ${userId}. Enrolling as TA. Correct if Necessary`);
         }
-      }),
-      success: function () {
-        console.log(`✅ ${userId} enrolled in incompletes section.`);
+
+        // 3️⃣ Enroll user in the target section using determined role
+        $.ajax({
+          type: "POST",
+          url: `/api/v1/courses/${courseId}/enrollments`,
+          contentType: "application/json",
+          data: JSON.stringify({
+            enrollment: {
+              user_id: "sis_login_id:" + userId,
+              type: enrollmentType,
+              enrollment_state: "active",
+              course_section_id: sectionId
+            }
+          }),
+          success: function () {
+            console.log(`✅ ${userId} enrolled as ${enrollmentType} in Extended Access section.`);
+          },
+          error: function (xhr) {
+            alert(`❌ Failed to enroll ${userId}: ${xhr.responseText}`);
+            incompletesInput.value = '';
+            dateInput.value = '';
+            updateCourse(originalTermId, originalEndDate, function () {});
+            window.location.href = `/courses/${courseId}/settings#tab-sections`;
+          }
+        });
       },
       error: function (xhr) {
-        alert(`❌ Failed to enroll ${userId}:`, xhr.responseText);
-          incompletesInput.value = '';
-          dateInput.value = '';
-          updateCourse(originalTermId, originalEndDate, function () {
-          });
-          window.location.href = `/courses/${courseId}/settings#tab-sections`;
+        alert(`❌ Failed to retrieve enrollment role for ${userId}: ${xhr.responseText}`);
+        incompletesInput.value = '';
+        dateInput.value = '';
+        updateCourse(originalTermId, originalEndDate, function () {});
+        window.location.href = `/courses/${courseId}/settings#tab-sections`;
       }
     });
   }
 
-  // Faculty Enroll UI
+  // ===== Faculty Enroll UI =====
   const container = document.createElement('div');
   container.style.position = 'fixed';
   container.style.top = '370px';
@@ -205,40 +267,47 @@
       alert("Please enter at least one valid NetID.");
       return;
     }
-    getCourseDetails(() => {})
-      updateCourse(defaultTermId, null, function (updateSuccess) {
-        if (!updateSuccess) {
-          alert("Failed to temporarily update course settings.");
-          return;
-        }
-        let completed = 0;
-        let anySuccess = false;
-        userIds.forEach(userId => {
-          enrollUser(userId, roleId, function (success) {
+
+    // 🔒 NEW: verify users first; do nothing if any is missing
+    verifyUsersExist(userIds).done(function () {
+      getCourseDetails(() => {
+        updateCourse(defaultTermId, null, function (updateSuccess) {
+          if (!updateSuccess) {
+            alert("Failed to temporarily update course settings.");
+            return;
+          }
+          let completed = 0;
+          let anySuccess = false;
+          userIds.forEach(userId => {
+            enrollUser(userId, roleId, function (success) {
               if (success) {
                 console.log(`✅ ${userId} enrolled successfully.`);
                 anySuccess = true;
               } else {
                 alert(`❌ Enrollment failed for ${userId}.`);
               }
-            completed++;
-            if (completed === userIds.length) {
-              updateCourse(originalTermId, originalEndDate, function () {
-                if (anySuccess) {
-                  input.value = '';
-                  location.reload();
-                } else {
-                  alert("All enrollments failed.");
-                }
-              });
-            }
+              completed++;
+              if (completed === userIds.length) {
+                updateCourse(originalTermId, originalEndDate, function () {
+                  if (anySuccess) {
+                    input.value = '';
+                    location.reload();
+                  } else {
+                    alert("All enrollments failed.");
+                  }
+                });
+              }
+            });
           });
         });
       });
+    }).fail(function () {
+      // A missing user was already alerted; stop here.
+      return;
+    });
   }
 
-  // Incompletes UI
-    // Student Incompletes UI
+  // ===== Extended Access UI =====
   const incompletesContainer = document.createElement('div');
   incompletesContainer.style.position = 'fixed';
   incompletesContainer.style.top = '220px';
@@ -256,7 +325,7 @@
   incompletesContainer.addEventListener('mouseleave', () => incompletesContainer.style.width = '120px');
 
   const incompletesTitle = document.createElement('div');
-  incompletesTitle.textContent = 'Student Incompletes';
+  incompletesTitle.textContent = 'Extended Access';
   incompletesTitle.style.fontWeight = 'bold';
   incompletesTitle.style.marginBottom = '6px';
   incompletesTitle.style.fontSize = '12px';
@@ -310,29 +379,33 @@
       alert("Please enter NetIDs and a valid end date.");
       return;
     }
-
     if (new Date(endDate) < new Date()) {
       alert("End date cannot be in the past.");
       return;
     }
-     getCourseDetails(() => {});
-     updateCourse(defaultTermId, null, function (updateSuccess) {
-        if (!updateSuccess) {
-          alert("Failed to temporarily update course settings.");
-          return;
-        }
-        let completed = 0;
-        let anySuccess = false;}
-     );
-    createIncompleteSection(endDate, function (sectionId) {
-      userIds.forEach(userId => {
-        enrollInSection(userId, sectionId);
-      });
-      incompletesInput.value = '';
-      dateInput.value = '';
-         updateCourse(originalTermId, originalEndDate, function () {
+
+    // 🔒 NEW: verify users first; if any missing, stop gracefully
+    verifyUsersExist(userIds).done(function () {
+      getCourseDetails(() => {
+        updateCourse(defaultTermId, null, function (updateSuccess) {
+          if (!updateSuccess) {
+            alert("Failed to temporarily update course settings.");
+            return;
+          }
+          createIncompleteSection(endDate, function (sectionId) {
+            userIds.forEach(userId => {
+              enrollInSection(userId, sectionId);
+            });
+            incompletesInput.value = '';
+            dateInput.value = '';
+            updateCourse(originalTermId, originalEndDate, function () {});
+            window.location.href = `/courses/${courseId}/sections/${sectionId}`;
           });
-      window.location.href = `/courses/${courseId}/sections/${sectionId}`;
+        });
+      });
+    }).fail(function () {
+      // A missing user was already alerted; do not proceed.
+      return;
     });
   }
 })();
