@@ -11,4 +11,4 @@ See: https://www.tampermonkey.net/ to install tampermonkey browser plugin.
 - TDXBanner-1.4.user.js*- Can move gnumbers into banner from TDX for Student and Faculty enrollments, is slow and not working well./
 - Merge Tool-1.6.user.js - Old Blackboard Merge tool (Depricated)
 - Canvas Feedback Script - allows instructors/staff to download feedback and rubric feedback for a course all at once.
-- Combined courses section due-date offset bulk tool - allows instuctors to set due dates based on Hour Offsets between sections - will apply to all assignments.
+- Combined courses section due-date offset bulk tool - allows instuctors to set due dates based on Hour Offsets between sections - will apply to all assignments.  (Also with groups support)
