@@ -12,3 +12,5 @@ See: https://www.tampermonkey.net/ to install tampermonkey browser plugin.
 - Merge Tool-1.6.user.js - Old Blackboard Merge tool (Depricated)
 - Canvas Feedback Script - allows instructors/staff to download feedback and rubric feedback for a course all at once.
 - Combined courses section due-date offset bulk tool - allows instuctors to set due dates based on Hour Offsets between sections - will apply to all assignments.  (Also with groups support)
+- Canvas API Enroll (Courses/Sections) - This enrolls like SIS, with limited role support - but runs as API instead so our sisbatch feeds will ignore these enrollments
+  
